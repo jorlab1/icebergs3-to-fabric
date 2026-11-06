@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.tfstate
+*.tfstate.*
+__pycache__/
+.venv/
+local/
+*-deployment.json
+*-query-result.json
