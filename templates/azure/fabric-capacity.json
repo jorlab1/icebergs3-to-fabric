@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "capacityName": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 63,
+      "metadata": {
+        "description": "Approved capacity name: lowercase letter followed by lowercase letters or digits."
+      }
+    },
+    "location": {
+      "type": "string",
+      "metadata": {
+        "description": "Approved Azure region supporting the required Fabric workloads and quota."
+      }
+    },
+    "skuName": {
+      "type": "string",
+      "metadata": {
+        "description": "Explicitly approved billable Fabric F SKU, for example F2. No default purchase size."
+      }
+    },
+    "administratorMembers": {
+      "type": "array",
+      "minLength": 1,
+      "metadata": {
+        "description": "Approved capacity administrator user identities in the target tenant, such as user principal names."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {}
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Fabric/capacities",
+      "apiVersion": "2023-11-01",
+      "name": "[parameters('capacityName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('skuName')]",
+        "tier": "Fabric"
+      },
+      "properties": {
+        "administration": {
+          "members": "[parameters('administratorMembers')]"
+        }
+      },
+      "tags": "[parameters('tags')]"
+    }
+  ],
+  "outputs": {
+    "capacityResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Fabric/capacities', parameters('capacityName'))]"
+    }
+  }
+}

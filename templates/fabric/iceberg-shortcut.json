@@ -1,0 +1,11 @@
+{
+  "path": "Tables",
+  "name": "orders",
+  "target": {
+    "amazonS3": {
+      "location": "https://YOUR_BUCKET.s3.YOUR_REGION.amazonaws.com",
+      "subpath": "/YOUR_ACTUAL_ICEBERG_TABLE_ROOT",
+      "connectionId": "YOUR_CONNECTION_ID"
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "displayName": "iceberg_poc",
+  "description": "Snowflake-managed Iceberg on customer-owned Amazon S3"
+}

@@ -2,7 +2,7 @@
 
 **Read Snowflake-managed Iceberg tables on Amazon S3 in Microsoft Fabric, then share a table across Fabric tenants without a copy pipeline.**
 
-This guide is for teams already comfortable with AWS IAM, S3, and Snowflake but new to Microsoft Fabric. It provides a Fabric-first walkthrough, reusable AWS policy and Snowflake SQL templates, and acceptance checks. It is a reference implementation, not a turnkey installer or production certification.
+This guide is for teams already comfortable with AWS IAM, S3, and Snowflake but new to Microsoft Fabric. It provides UI and programmatic Fabric walkthroughs, reusable AWS policy, Snowflake SQL, and Fabric REST templates, and acceptance checks. It is a reference implementation, not a turnkey installer or production certification.
 
 You can use an existing compatible Iceberg table and skip the sample source setup. AWS Glue, Athena, EMR, and Snowflake Open Catalog are not required for this architecture.
 
@@ -66,6 +66,8 @@ The direct table-sharing path was observed to resolve in a recipient tenant in t
 
 **Fabric:** a tenant with Fabric enabled, a workspace on an active supported capacity or trial, and Contributor or higher workspace access for creating the lakehouse. The cloud connection requires appropriate connection-creation rights. For external sharing, both tenant administrators must enable it and authorize the people who create/accept shares; the provider needs Read and Reshare permissions on the item.
 
+**Optional platform IaC:** if those Fabric prerequisites do not exist yet, use the [capacity, tenant-settings, and workspace bootstrap guide](docs/fabric-platform-bootstrap.md). It includes a stable Azure ARM capacity template and scoped Fabric admin/workspace REST examples, with separate paid-capacity and tenant-policy approval gates.
+
 | Input | Example / requirement |
 |---|---|
 | Bucket and region | Dedicated private bucket; preferably the Snowflake AWS region |
@@ -79,7 +81,30 @@ The direct table-sharing path was observed to resolve in a recipient tenant in t
 
 Check AWS SCPs/RCPs, bucket-policy denies, network controls, and KMS policies **before** provisioning. An explicit Deny overrides role trust and IAM Allows. Organizations that restrict outside-org `sts:AssumeRole` require an approved, narrowly scoped exception for Snowflake. Do not disable organization policies or copy another environment's exception.
 
+## Deployment file map
+
+The checked-in deployment artifacts are **IAM policy documents, executable Snowflake SQL, Fabric REST request templates, and an optional Azure ARM capacity template**, with programmatic walkthroughs. They are not a complete end-to-end stateful IaC stack. The map below traces each walkthrough step to its source file and identifies the approval and manual boundaries.
+
+| Walkthrough section | Repository artifact | Deployment responsibility |
+|---|---|---|
+| [Optional platform bootstrap](docs/fabric-platform-bootstrap.md) | [`fabric-capacity.json`](templates/azure/fabric-capacity.json), [`workspace.json`](templates/fabric/workspace.json), [`workspace-role-assignment.json`](templates/fabric/workspace-role-assignment.json) | Optional ARM capacity deployment, reviewed tenant-setting updates, workspace creation/capacity assignment and deployer access |
+| [1. Snowflake source](#1-prepare-or-confirm-the-snowflake-source) | [`snowflake-writer-policy.json`](templates/aws/snowflake-writer-policy.json) | Permissions to attach to the writer role; does not create the bucket or role |
+| [1. Snowflake source](#1-prepare-or-confirm-the-snowflake-source) | [`01-external-volume.sql`](templates/snowflake/01-external-volume.sql) | Creates/describes the external volume and includes its verification query |
+| [1. Snowflake source](#1-prepare-or-confirm-the-snowflake-source) | [`snowflake-role-trust.json`](templates/aws/snowflake-role-trust.json) | Final role trust using the principal returned by Snowflake and the matching external ID |
+| [1. Snowflake source](#1-prepare-or-confirm-the-snowflake-source) | [`02-sample-table.sql`](templates/snowflake/02-sample-table.sql) | Creates warehouse, database, schema, Iceberg table, and initial rows; reports metadata location and suspends compute |
+| [2. Fabric lakehouse](#2-create-the-fabric-workspace-and-lakehouse) | [`lakehouse.json`](templates/fabric/lakehouse.json) and [REST walkthrough](docs/fabric-rest-deployment.md#2-create-the-lakehouse-and-handle-provisioning) | Creates the lakehouse in an existing workspace, including long-running-operation handling; UI is also supported |
+| [3. Reader access](#3-give-fabric-read-only-s3-access) | [`fabric-reader-policy.json`](templates/aws/fabric-reader-policy.json) | Permissions to attach to a dedicated reader IAM user; does not create the user or key |
+| [4. Iceberg shortcut](#4-create-the-iceberg-table-shortcut) | [`s3-connection.json`](templates/fabric/s3-connection.json), [`iceberg-shortcut.json`](templates/fabric/iceberg-shortcut.json), and [REST walkthrough](docs/fabric-rest-deployment.md#3-discover-and-create-the-s3-connection) | Creates a tested S3 connection and table shortcut with runtime credentials and returned resource IDs; UI is also supported |
+| [5. Validation](#5-validate-initial-reads-and-source-refresh) | [`03-refresh-test.sql`](templates/snowflake/03-refresh-test.sql) | Adds the fourth source row, checks the source aggregate, and suspends compute; Fabric queries are inline below |
+| [6. External sharing](#6-share-the-table-with-another-fabric-tenant) | No provisioning file | Tenant approvals, direct-table invitation, and recipient acceptance use the Fabric UI |
+
+**Dependency order:** prepare the bucket and writer role, apply the writer policy, create the external volume, obtain the Snowflake principal, apply final trust, verify the volume, then create the sample table. Create reader credentials before the Fabric connection/shortcut. Verify the initial Fabric query before running the fourth-row test, and validate provider access before external sharing.
+
+For reuse in your own IaC, parameterize the bucket, prefix, role ARN, external ID, and Snowflake object names consistently across these files. Apply the IAM JSON through your approved tooling and execute the SQL through your approved Snowflake deployment tooling. The [Fabric REST deployment guide](docs/fabric-rest-deployment.md) documents the calls used in the original deployment, with reusable request bodies and staged PowerShell examples. These examples create resources; they are not an idempotent state-reconciliation engine.
+
 ## 1. Prepare or confirm the Snowflake source
+
+**Deployment files:** [writer permissions](templates/aws/snowflake-writer-policy.json), [external volume](templates/snowflake/01-external-volume.sql), [final role trust](templates/aws/snowflake-role-trust.json), and [sample objects/data](templates/snowflake/02-sample-table.sql). The external-volume file includes verification after `DESC`; pause there to apply final AWS trust before executing the verification query.
 
 If you already have a Snowflake-managed Iceberg table on S3, verify its external volume and retrieve the current metadata location:
 
@@ -103,6 +128,8 @@ The SQL intentionally uses `CREATE`, not `CREATE OR REPLACE`. Inspect existing r
 
 ## 2. Create the Fabric workspace and lakehouse
 
+**Programmatic option:** optionally start with the [platform bootstrap](docs/fabric-platform-bootstrap.md) for capacity, scoped tenant settings, and workspace creation. Then use [`templates/fabric/lakehouse.json`](templates/fabric/lakehouse.json) with `POST /v1/workspaces/{workspaceId}/lakehouses`. The [REST walkthrough](docs/fabric-rest-deployment.md#2-create-the-lakehouse-and-handle-provisioning) covers service-principal authentication, duplicate checks, `201`/`202` responses, polling, and returned lakehouse IDs. The following UI steps are an alternative, not a prerequisite to the REST option.
+
 1. Sign in at [app.fabric.microsoft.com](https://app.fabric.microsoft.com/) using your organization's account.
 2. Use an approved workspace assigned to active Fabric capacity. If creating a workspace, select the approved capacity in workspace settings; do not purchase or activate capacity without authorization.
 3. In the workspace, select **New item > Lakehouse**, name it `iceberg_poc`, and create it. UI wording can change.
@@ -111,6 +138,8 @@ The SQL intentionally uses `CREATE`, not `CREATE OR REPLACE`. Inspect existing r
 The lakehouse automatically gets a SQL analytics endpoint. You do not need a separate warehouse, pipeline, or Spark notebook merely to read this sample.
 
 ## 3. Give Fabric read-only S3 access
+
+**Deployment file:** [`templates/aws/fabric-reader-policy.json`](templates/aws/fabric-reader-policy.json). This is a policy document to attach to your reader identity, not an IAM-user/access-key creation script.
 
 Apply [the reader policy](templates/aws/fabric-reader-policy.json) to a dedicated IAM user without console access. It grants `GetObject` for `iceberg/*`, and bucket-level `ListBucket` / `GetBucketLocation`. Restrict object scope further for production. Bucket listing exposes key names, even where object reads are denied.
 
@@ -131,6 +160,8 @@ Keep S3 Block Public Access enabled. The endpoint must be reachable from the cho
 
 ## 4. Create the Iceberg table shortcut
 
+**Programmatic option:** use [`s3-connection.json`](templates/fabric/s3-connection.json) with `POST /v1/connections`, then [`iceberg-shortcut.json`](templates/fabric/iceberg-shortcut.json) with `POST /v1/workspaces/{workspaceId}/items/{lakehouseId}/shortcuts?shortcutConflictPolicy=Abort`. Follow the [REST walkthrough](docs/fabric-rest-deployment.md#3-discover-and-create-the-s3-connection) for connector discovery, in-memory credential injection, schema-aware placement, and saved-target verification. Use the bucket/prefix authorized by [the reader policy](templates/aws/fabric-reader-policy.json) and actual metadata location returned by [the source SQL](templates/snowflake/02-sample-table.sql). The UI workflow below remains available.
+
 1. In the lakehouse, right-click **Tables** (or its `dbo` schema) and select **New shortcut**.
 2. Choose **Amazon S3**, not **Amazon S3 compatible**.
 3. Enter `https://YOUR_BUCKET.s3.YOUR_REGION.amazonaws.com`.
@@ -143,6 +174,8 @@ Do **not** select the bucket root, shared `iceberg/` prefix, `data/`, or a metad
 OneLake generates virtual Delta metadata. The S3 shortcut is read-only; Fabric does not write source data back to Snowflake.
 
 ## 5. Validate initial reads and source refresh
+
+**Deployment files:** [`02-sample-table.sql`](templates/snowflake/02-sample-table.sql) establishes the initial three-row source; [`03-refresh-test.sql`](templates/snowflake/03-refresh-test.sql) performs the one-time fourth-row change. The following T-SQL runs in Fabric, not in either Snowflake file.
 
 For the sample, switch the lakehouse to its **SQL analytics endpoint**, choose **New SQL query**, and run:
 
@@ -171,7 +204,11 @@ Metadata conversion can take 5 seconds to 2 minutes. Microsoft recommends source
 
 ## 6. Share the table with another Fabric tenant
 
+**Deployment coverage:** no external-share provisioning file is checked in. This section documents the provider/recipient UI workflow and approval boundary; the upstream [reader policy](templates/aws/fabric-reader-policy.json) grants storage access to Fabric, not permissions to recipient users.
+
 This is optional. First review [external-sharing security considerations](https://learn.microsoft.com/fabric/governance/external-data-sharing-overview#security-considerations) and obtain data-owner approval.
+
+For programmatic tenant-policy preparation, see [administrator-reviewed tenant settings](docs/fabric-platform-bootstrap.md#2-review-and-manage-tenant-settings-as-policy). Provider and recipient settings must each be approved and applied by their own tenant administrators; that preparation does not create or accept a share.
 
 1. Both tenant administrators enable external data sharing and authorize the provider/recipient users.
 2. In the provider workspace, open the lakehouse item's context menu and select **External data share**.
@@ -219,11 +256,15 @@ Do not move raw Iceberg folders: metadata can contain absolute file references. 
 README.md                   Fabric-first guide and both architecture diagrams
 LICENSE                     MIT license
 docs/images/                Simplified logo-based diagram
+docs/fabric-rest-deployment.md  Programmatic Fabric calls and PowerShell walkthrough
+docs/fabric-platform-bootstrap.md  Optional capacity, tenant policy, and workspace IaC
+templates/azure/            ARM capacity template with explicit SKU/region/admin inputs
 templates/aws/              Writer, final trust, and reader policy templates
 templates/snowflake/         External volume, synthetic sample, refresh test
+templates/fabric/            Workspace, role, lakehouse, connection, and shortcut REST bodies
 ```
 
-Replace every placeholder and review grants before execution. No live account IDs, tenant IDs, endpoint IDs, deployment state, or credentials are needed to use these templates. Environment-specific local deployment/authentication helpers are deliberately not published.
+Replace every placeholder and review grants before execution. Supply your own account, tenant, workspace, and deployment identities at runtime; no originating-environment IDs, deployment state, or credentials are included. Environment-specific local deployment/authentication helpers are deliberately not published; the Fabric REST guide generalizes their deployment sequence.
 
 ## References
 

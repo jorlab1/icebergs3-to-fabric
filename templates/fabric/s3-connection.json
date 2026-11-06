@@ -1,0 +1,26 @@
+{
+  "connectivityType": "ShareableCloud",
+  "displayName": "iceberg-s3-reader",
+  "connectionDetails": {
+    "type": "AmazonS3",
+    "creationMethod": "AmazonS3.Storage",
+    "parameters": [
+      {
+        "dataType": "Text",
+        "name": "url",
+        "value": "https://YOUR_BUCKET.s3.YOUR_REGION.amazonaws.com"
+      }
+    ]
+  },
+  "privacyLevel": "Organizational",
+  "credentialDetails": {
+    "singleSignOnType": "None",
+    "connectionEncryption": "NotEncrypted",
+    "skipTestConnection": false,
+    "credentials": {
+      "credentialType": "Basic",
+      "username": "INJECT_ACCESS_KEY_ID_AT_RUNTIME",
+      "password": "INJECT_SECRET_ACCESS_KEY_AT_RUNTIME"
+    }
+  }
+}

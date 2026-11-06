@@ -1,0 +1,5 @@
+{
+  "displayName": "icebergs3-to-fabric",
+  "description": "Snowflake-managed Iceberg on S3 evaluation",
+  "capacityId": "YOUR_FABRIC_CAPACITY_GUID"
+}

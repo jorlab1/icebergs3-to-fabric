@@ -1,0 +1,7 @@
+{
+  "principal": {
+    "id": "YOUR_DEPLOYMENT_SERVICE_PRINCIPAL_OBJECT_ID",
+    "type": "ServicePrincipal"
+  },
+  "role": "Contributor"
+}
